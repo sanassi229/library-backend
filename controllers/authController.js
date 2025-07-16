@@ -1,6 +1,17 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 const { query } = require('../config/database');
+
+const emailTransporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: false,
+    auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS
+    }
+});
 
 const generateCardId = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -17,9 +28,40 @@ const generateToken = (userId) => {
     });
 };
 
+const sendLibraryCardEmail = async (email, name, cardId) => {
+    try {
+        const mailOptions = {
+            from: process.env.SMTP_FROM,
+            to: email,
+            subject: 'Đăng ký thẻ thư viện thành công',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #2c5aa0;">Chào mừng bạn đến với Thư viện!</h2>
+                    <p>Xin chào <strong>${name}</strong>,</p>
+                    <p>Chúc mừng bạn đã đăng ký thẻ thư viện thành công!</p>
+                    <div style="background-color: #f5f5f5; padding: 20px; border-radius: 5px; margin: 20px 0;">
+                        <h3 style="color: #2c5aa0; margin-top: 0;">Thông tin thẻ thư viện:</h3>
+                        <p><strong>Mã thẻ:</strong> <span style="color: #d32f2f; font-size: 18px; font-weight: bold;">${cardId}</span></p>
+                        <p><strong>Họ tên:</strong> ${name}</p>
+                        <p><strong>Email:</strong> ${email}</p>
+                    </div>
+                    <p>Vui lòng lưu giữ mã thẻ này để sử dụng khi mượn sách và đăng ký tài khoản trực tuyến.</p>
+                    <p>Trân trọng,<br>Đội ngũ Thư viện</p>
+                </div>
+            `
+        };
+
+        await emailTransporter.sendMail(mailOptions);
+        return true;
+    } catch (error) {
+        console.error('Send email error:', error);
+        return false;
+    }
+};
+
 const registerAccount = async (req, res) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password, cardId } = req.body;
 
         if (!name || !email || !password) {
             return res.status(400).json({
@@ -50,15 +92,13 @@ const registerAccount = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        const result = await query(
+        const userResult = await query(
             'INSERT INTO account_user (nameuser, emailuser, passworduser) VALUES ($1, $2, $3) RETURNING iduser, nameuser, emailuser, createdat',
             [name.trim(), email.toLowerCase(), hashedPassword]
         );
 
-        const user = result.rows[0];
-        const token = generateToken(user.iduser);
-
-        const userResponse = {
+        const user = userResult.rows[0];
+        let userResponse = {
             id: user.iduser,
             name: user.nameuser,
             email: user.emailuser,
@@ -67,9 +107,55 @@ const registerAccount = async (req, res) => {
             createdAt: user.createdat
         };
 
+        if (cardId) {
+            const cardCheck = await query(
+                'SELECT * FROM thethuvien WHERE idcard = $1',
+                [cardId.toUpperCase()]
+            );
+
+            if (cardCheck.rows.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Mã thẻ không tồn tại'
+                });
+            }
+
+            const cardLinkCheck = await query(
+                'SELECT * FROM docgia WHERE idcard = $1',
+                [cardId.toUpperCase()]
+            );
+
+            if (cardLinkCheck.rows.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Mã thẻ đã được kết nối với tài khoản khác'
+                });
+            }
+
+            await query(
+                'INSERT INTO docgia (iduser, idcard) VALUES ($1, $2)',
+                [user.iduser, cardId.toUpperCase()]
+            );
+
+            const cardInfo = cardCheck.rows[0];
+            userResponse = {
+                ...userResponse,
+                role: 'member',
+                hasLibraryCard: true,
+                cardId: cardInfo.idcard,
+                cardName: cardInfo.namecard,
+                address: cardInfo.addresscard,
+                phone: cardInfo.phonecard
+            };
+        }
+
+        const token = generateToken(user.iduser);
+
         res.status(201).json({
             success: true,
-            message: 'Đăng ký tài khoản thành công! Bạn có thể đăng ký thẻ thư viện để mượn sách.',
+            message: cardId ? 
+                'Đăng ký tài khoản và liên kết thẻ thư viện thành công!' : 
+                'Đăng ký tài khoản thành công! Bạn có thể đăng ký thẻ thư viện để mượn sách.',
             data: {
                 user: userResponse,
                 token
@@ -131,6 +217,18 @@ const registerCardOnly = async (req, res) => {
             });
         }
 
+        const cccdCheck = await query(
+            'SELECT * FROM thethuvien WHERE cccd = $1',
+            [cccd]
+        );
+
+        if (cccdCheck.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'CCCD đã được đăng ký thẻ thư viện'
+            });
+        }
+
         let cardId;
         let isCardIdUnique = false;
         let attempts = 0;
@@ -156,22 +254,29 @@ const registerCardOnly = async (req, res) => {
         }
 
         const result = await query(
-            'INSERT INTO thethuvien (idcard, namecard, emailcard, addresscard, phonecard) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-            [cardId, name.trim(), email.toLowerCase(), address.trim(), phone.trim()]
+            'INSERT INTO thethuvien (idcard, namecard, emailcard, addresscard, phonecard, cccd) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            [cardId, name.trim(), email.toLowerCase(), address.trim(), phone.trim(), cccd.trim()]
         );
 
         const card = result.rows[0];
 
+        const emailSent = await sendLibraryCardEmail(card.emailcard, card.namecard, card.idcard);
+
+        if (!emailSent) {
+            console.log('Failed to send email, but card was created successfully');
+        }
+
         res.status(201).json({
             success: true,
-            message: 'Đăng ký thẻ thư viện thành công! Vui lòng kiểm tra email để xác nhận.',
+            message: 'Đăng ký thẻ thư viện thành công! Vui lòng kiểm tra email để nhận mã thẻ.',
             data: {
                 cardId: card.idcard,
                 name: card.namecard,
                 email: card.emailcard,
                 address: card.addresscard,
                 phone: card.phonecard,
-                cccd: cccd
+                cccd: card.cccd,
+                emailSent: emailSent
             }
         });
 
@@ -213,7 +318,11 @@ const login = async (req, res) => {
                 d.idcard,
                 t.namecard,
                 t.addresscard,
-                t.phonecard
+                t.phonecard,
+                t.cccd,
+                t.startcard,
+                t.expirecard,
+                t.statuscard
             FROM account_user u
             LEFT JOIN docgia d ON u.iduser = d.iduser
             LEFT JOIN thuthu th ON u.iduser = th.iduser
@@ -250,7 +359,11 @@ const login = async (req, res) => {
             cardId: user.idcard,
             cardName: user.namecard,
             address: user.addresscard,
-            phone: user.phonecard
+            phone: user.phonecard,
+            cccd: user.cccd,
+            memberSince: user.startcard,
+            cardExpiry: user.expirecard,
+            cardStatus: user.statuscard
         };
 
         res.json({
@@ -293,6 +406,7 @@ const getCurrentUser = async (req, res) => {
                 t.namecard,
                 t.addresscard,
                 t.phonecard,
+                t.cccd,
                 t.startcard,
                 t.expirecard,
                 t.statuscard
@@ -322,6 +436,7 @@ const getCurrentUser = async (req, res) => {
             cardName: user.namecard,
             address: user.addresscard,
             phone: user.phonecard,
+            cccd: user.cccd,
             memberSince: user.startcard,
             cardExpiry: user.expirecard,
             cardStatus: user.statuscard
@@ -341,10 +456,87 @@ const getCurrentUser = async (req, res) => {
     }
 };
 
+const linkCardToAccount = async (req, res) => {
+    try {
+        const { cardId } = req.body;
+        const userId = req.user.userId;
+
+        if (!cardId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Vui lòng nhập mã thẻ'
+            });
+        }
+
+        const userCardCheck = await query(
+            'SELECT * FROM docgia WHERE iduser = $1',
+            [userId]
+        );
+
+        if (userCardCheck.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tài khoản đã được liên kết với thẻ thư viện'
+            });
+        }
+
+        const cardCheck = await query(
+            'SELECT * FROM thethuvien WHERE idcard = $1',
+            [cardId.toUpperCase()]
+        );
+
+        if (cardCheck.rows.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Mã thẻ không tồn tại'
+            });
+        }
+
+        const cardLinkCheck = await query(
+            'SELECT * FROM docgia WHERE idcard = $1',
+            [cardId.toUpperCase()]
+        );
+
+        if (cardLinkCheck.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Mã thẻ đã được kết nối với tài khoản khác'
+            });
+        }
+
+        await query(
+            'INSERT INTO docgia (iduser, idcard) VALUES ($1, $2)',
+            [userId, cardId.toUpperCase()]
+        );
+
+        const cardInfo = cardCheck.rows[0];
+
+        res.json({
+            success: true,
+            message: 'Liên kết thẻ thư viện thành công!',
+            data: {
+                cardId: cardInfo.idcard,
+                cardName: cardInfo.namecard,
+                address: cardInfo.addresscard,
+                phone: cardInfo.phonecard,
+                cccd: cardInfo.cccd
+            }
+        });
+
+    } catch (error) {
+        console.error('Link card to account error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server trong quá trình liên kết thẻ'
+        });
+    }
+};
+
 module.exports = {
     registerAccount,
     registerCardOnly,
     login,
     getCurrentUser,
+    linkCardToAccount,
     generateCardId
 };
