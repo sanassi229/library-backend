@@ -61,12 +61,12 @@ const sendLibraryCardEmail = async (email, name, cardId) => {
 
 const registerAccount = async (req, res) => {
     try {
-        const { name, email, password, cardId } = req.body;
+        const { name, email, password, cardId, username } = req.body;
 
-        if (!name || !email || !password) {
+        if (!name || !email || !password || !cardId || !username) {
             return res.status(400).json({
                 success: false,
-                message: 'Vui lòng điền đầy đủ: tên, email, mật khẩu'
+                message: 'Vui lòng điền đầy đủ: tên, email, mật khẩu, tài khoản, mã thẻ'
             });
         }
 
@@ -75,6 +75,14 @@ const registerAccount = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: 'Email không hợp lệ'
+            });
+        }
+
+        const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/;
+        if (!usernameRegex.test(username)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tài khoản phải từ 3-20 ký tự, chỉ chứa chữ, số và dấu gạch dưới'
             });
         }
 
@@ -90,72 +98,84 @@ const registerAccount = async (req, res) => {
             });
         }
 
+        const usernameCheck = await query(
+            'SELECT * FROM account_user WHERE username = $1',
+            [username.toLowerCase()]
+        );
+
+        if (usernameCheck.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tài khoản đã được sử dụng'
+            });
+        }
+
+        const cardCheck = await query(
+            'SELECT * FROM thethuvien WHERE idcard = $1',
+            [cardId.toUpperCase()]
+        );
+
+        if (cardCheck.rows.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Mã thẻ không tồn tại'
+            });
+        }
+
+        const cardInfo = cardCheck.rows[0];
+        if (cardInfo.emailcard !== email.toLowerCase()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email phải trùng với email đã đăng ký thẻ thư viện'
+            });
+        }
+
+        const cardLinkCheck = await query(
+            'SELECT * FROM docgia WHERE idcard = $1',
+            [cardId.toUpperCase()]
+        );
+
+        if (cardLinkCheck.rows.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Mã thẻ đã được kết nối với tài khoản khác'
+            });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 12);
 
         const userResult = await query(
-            'INSERT INTO account_user (nameuser, emailuser, passworduser) VALUES ($1, $2, $3) RETURNING iduser, nameuser, emailuser, createdat',
-            [name.trim(), email.toLowerCase(), hashedPassword]
+            'INSERT INTO account_user (nameuser, emailuser, passworduser, username) VALUES ($1, $2, $3, $4) RETURNING iduser, nameuser, emailuser, username, createdat',
+            [name.trim(), email.toLowerCase(), hashedPassword, username.toLowerCase()]
         );
 
         const user = userResult.rows[0];
-        let userResponse = {
+
+        await query(
+            'INSERT INTO docgia (iduser, idcard) VALUES ($1, $2)',
+            [user.iduser, cardId.toUpperCase()]
+        );
+
+        const userResponse = {
             id: user.iduser,
             name: user.nameuser,
             email: user.emailuser,
-            role: 'user',
-            hasLibraryCard: false,
+            username: user.username,
+            role: 'member',
+            hasLibraryCard: true,
+            cardId: cardInfo.idcard,
+            cardName: cardInfo.namecard,
+            address: cardInfo.addresscard,
+            phone: cardInfo.phonecard,
+            cccd: cardInfo.cccd,
             createdAt: user.createdat
         };
-
-        if (cardId) {
-            const cardCheck = await query(
-                'SELECT * FROM thethuvien WHERE idcard = $1',
-                [cardId.toUpperCase()]
-            );
-
-            if (cardCheck.rows.length === 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Mã thẻ không tồn tại'
-                });
-            }
-
-            const cardLinkCheck = await query(
-                'SELECT * FROM docgia WHERE idcard = $1',
-                [cardId.toUpperCase()]
-            );
-
-            if (cardLinkCheck.rows.length > 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Mã thẻ đã được kết nối với tài khoản khác'
-                });
-            }
-
-            await query(
-                'INSERT INTO docgia (iduser, idcard) VALUES ($1, $2)',
-                [user.iduser, cardId.toUpperCase()]
-            );
-
-            const cardInfo = cardCheck.rows[0];
-            userResponse = {
-                ...userResponse,
-                role: 'member',
-                hasLibraryCard: true,
-                cardId: cardInfo.idcard,
-                cardName: cardInfo.namecard,
-                address: cardInfo.addresscard,
-                phone: cardInfo.phonecard
-            };
-        }
 
         const token = generateToken(user.iduser);
 
         res.status(201).json({
             success: true,
-            message: cardId ? 
-                'Đăng ký tài khoản và liên kết thẻ thư viện thành công!' : 
-                'Đăng ký tài khoản thành công! Bạn có thể đăng ký thẻ thư viện để mượn sách.',
+            message: 'Đăng ký tài khoản và liên kết thẻ thư viện thành công!',
             data: {
                 user: userResponse,
                 token
@@ -291,12 +311,12 @@ const registerCardOnly = async (req, res) => {
 
 const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { username, password } = req.body;
 
-        if (!email || !password) {
+        if (!username || !password) {
             return res.status(400).json({
                 success: false,
-                message: 'Vui lòng nhập email và mật khẩu'
+                message: 'Vui lòng nhập tài khoản và mật khẩu'
             });
         }
 
@@ -305,6 +325,7 @@ const login = async (req, res) => {
                 u.iduser,
                 u.nameuser,
                 u.emailuser,
+                u.username,
                 u.passworduser,
                 CASE 
                     WHEN th.iduser IS NOT NULL THEN 'librarian'
@@ -327,15 +348,15 @@ const login = async (req, res) => {
             LEFT JOIN docgia d ON u.iduser = d.iduser
             LEFT JOIN thuthu th ON u.iduser = th.iduser
             LEFT JOIN thethuvien t ON d.idcard = t.idcard
-            WHERE u.emailuser = $1
-        `, [email.toLowerCase()]);
+            WHERE u.username = $1
+        `, [username.toLowerCase()]);
 
         const user = result.rows[0];
 
         if (!user) {
             return res.status(401).json({
                 success: false,
-                message: 'Email hoặc mật khẩu không đúng'
+                message: 'Tài khoản hoặc mật khẩu không đúng'
             });
         }
 
@@ -344,7 +365,7 @@ const login = async (req, res) => {
         if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
-                message: 'Email hoặc mật khẩu không đúng'
+                message: 'Tài khoản hoặc mật khẩu không đúng'
             });
         }
 
@@ -354,6 +375,7 @@ const login = async (req, res) => {
             id: user.iduser,
             name: user.nameuser,
             email: user.emailuser,
+            username: user.username,
             role: user.userrole,
             hasLibraryCard: user.haslibrarycard,
             cardId: user.idcard,
@@ -393,6 +415,7 @@ const getCurrentUser = async (req, res) => {
                 u.iduser,
                 u.nameuser,
                 u.emailuser,
+                u.username,
                 CASE 
                     WHEN th.iduser IS NOT NULL THEN 'librarian'
                     WHEN d.iduser IS NOT NULL THEN 'member'
@@ -430,6 +453,7 @@ const getCurrentUser = async (req, res) => {
             id: user.iduser,
             name: user.nameuser,
             email: user.emailuser,
+            username: user.username,
             role: user.userrole,
             hasLibraryCard: user.haslibrarycard,
             cardId: user.idcard,

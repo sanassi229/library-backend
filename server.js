@@ -15,6 +15,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/books', require('./routes/books'));
+app.use('/api/banners', require('./routes/banner'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/collections', require('./routes/collections'));
 app.use('/api/borrow', require('./routes/borrow'));
@@ -39,6 +40,7 @@ app.get('/', (req, res) => {
       '/health': 'System health check',
       '/api/auth/*': 'Authentication endpoints',
       '/api/books/*': 'Book management endpoints',
+      '/api/banners/*': 'Banner management endpoints',
       '/api/users/*': 'User management endpoints',
       '/api/collections/*': 'Collection management endpoints',
       '/api/borrow/*': 'Borrow management endpoints'
@@ -57,9 +59,21 @@ app.get('/', (req, res) => {
       'POST /api/books': 'Add book (admin/librarian)',
       'PUT /api/books/:id': 'Update book (admin/librarian)',
       'DELETE /api/books/:id': 'Delete book (admin/librarian)'
+    },
+    bannerEndpoints: {
+      'GET /api/banners': 'Get all active banners',
+      'GET /api/banners/:id': 'Get banner by ID',
+      'POST /api/banners': 'Add banner (admin/librarian)',
+      'PUT /api/banners/:id': 'Update banner (admin/librarian)',
+
+      'PATCH /api/banners/:id/status': 'Update banner status (admin/librarian)',
+      'DELETE /api/banners/:id': 'Delete banner (admin)'
     }
   });
 });
+
+const swaggerSetup = require('./swagger');
+swaggerSetup(app);
 
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -73,6 +87,7 @@ app.use('*', (req, res) => {
       'POST /api/auth/login',
       'GET /api/books',
       'GET /api/books/search',
+      'GET /api/banners',
       'GET /api/collections',
       'GET /api/users (admin)',
       'GET /api/borrow (admin/librarian)'
@@ -121,6 +136,11 @@ const startServer = async () => {
       console.log(`   GET  http://localhost:${PORT}/api/books/search`);
       console.log(`   GET  http://localhost:${PORT}/api/books/categories`);
       console.log(`   POST http://localhost:${PORT}/api/books (admin/librarian)`);
+      console.log('\n🎨 Banner APIs:');
+      console.log(`   GET  http://localhost:${PORT}/api/banners`);
+      console.log(`   POST http://localhost:${PORT}/api/banners (admin/librarian)`);
+      console.log(`   PUT  http://localhost:${PORT}/api/banners/:id (admin/librarian)`);
+      console.log(`   DELETE http://localhost:${PORT}/api/banners/:id (admin)`);
       console.log('\n👥 User APIs:');
       console.log(`   GET  http://localhost:${PORT}/api/users (admin)`);
       console.log(`   GET  http://localhost:${PORT}/api/users/search (admin)`);
