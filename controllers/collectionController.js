@@ -3,7 +3,7 @@ const { query } = require('../config/database');
 const getAllCollections = async (req, res) => {
     try {
         const result = await query(
-            'SELECT * FROM suutap ORDER BY namecollection'
+            'SELECT * FROM collections ORDER BY namecollection'
         );
 
         res.json({
@@ -25,7 +25,7 @@ const getCollectionById = async (req, res) => {
         const { id } = req.params;
 
         const collectionResult = await query(
-            'SELECT * FROM suutap WHERE idcollection = $1',
+            'SELECT * FROM collections WHERE idcollection = $1',
             [id]
         );
 
@@ -93,7 +93,7 @@ const searchCollections = async (req, res) => {
             : '';
 
         const result = await query(`
-            SELECT * FROM suutap 
+            SELECT * FROM collections 
             ${whereClause}
             ORDER BY namecollection
         `, params);
@@ -124,7 +124,7 @@ const createCollection = async (req, res) => {
         }
 
         const existingCollection = await query(
-            'SELECT * FROM suutap WHERE idcollection = $1',
+            'SELECT * FROM collections WHERE idcollection = $1',
             [id]
         );
 
@@ -138,7 +138,7 @@ const createCollection = async (req, res) => {
         const imageBuffer = image ? Buffer.from(image, 'base64') : null;
 
         const result = await query(`
-            INSERT INTO suutap (idcollection, namecollection, descriptioncollection, imagecollection)
+            INSERT INTO collections (idcollection, namecollection, descriptioncollection, imagecollection)
             VALUES ($1, $2, $3, $4)
             RETURNING *
         `, [id, name, description, imageBuffer]);
@@ -179,7 +179,7 @@ const addBookToCollection = async (req, res) => {
         }
 
         const checkCollection = await query(
-            'SELECT * FROM suutap WHERE idcollection = $1',
+            'SELECT * FROM collections WHERE idcollection = $1',
             [collectionId]
         );
 
@@ -273,7 +273,7 @@ const deleteCollection = async (req, res) => {
         const { id } = req.params;
 
         const checkCollection = await query(
-            'SELECT * FROM suutap WHERE idcollection = $1',
+            'SELECT * FROM collections WHERE idcollection = $1',
             [id]
         );
 
@@ -290,7 +290,7 @@ const deleteCollection = async (req, res) => {
         );
 
         await query(
-            'DELETE FROM suutap WHERE idcollection = $1',
+            'DELETE FROM collections WHERE idcollection = $1',
             [id]
         );
 
