@@ -41,9 +41,9 @@ app.get('/', (req, res) => {
       '/api/auth/*': 'Authentication endpoints',
       '/api/books/*': 'Book management endpoints',
       '/api/banners/*': 'Banner management endpoints',
-      '/api/users/*': 'User management endpoints',
+      '/api/users/*': 'User management endpoints (including user self-service)',
       '/api/collections/*': 'Collection management endpoints',
-      '/api/borrow/*': 'Borrow management endpoints'
+      '/api/borrow/*': 'Borrow management endpoints (admin/librarian)'
     },
     authEndpoints: {
       'POST /api/auth/register': 'Register basic account',
@@ -60,12 +60,28 @@ app.get('/', (req, res) => {
       'PUT /api/books/:id': 'Update book (admin/librarian)',
       'DELETE /api/books/:id': 'Delete book (admin/librarian)'
     },
+    userEndpoints: {
+      'GET /api/users': 'Get all users (admin)',
+      'GET /api/users/search': 'Search users (admin)',
+      'GET /api/users/:id': 'Get user by ID',
+      'GET /api/users/:id/profile': 'Get user profile',
+      'PUT /api/users/:id': 'Update user (admin)',
+      'DELETE /api/users/:id': 'Delete user (admin)',
+      'POST /api/users/borrow': 'User self-borrow books (authenticated user)',
+      'GET /api/users/my-borrows': 'Get my borrowed books (authenticated user)'
+    },
+    borrowEndpoints: {
+      'GET /api/borrow': 'Get all borrows (admin/librarian)',
+      'GET /api/borrow/search': 'Search borrows (admin/librarian)',
+      'POST /api/borrow': 'Create borrow record (admin/librarian)',
+      'PATCH /api/borrow/:id/status': 'Update borrow status (admin/librarian)',
+      'DELETE /api/borrow/:id': 'Delete borrow record (admin/librarian)'
+    },
     bannerEndpoints: {
       'GET /api/banners': 'Get all active banners',
       'GET /api/banners/:id': 'Get banner by ID',
       'POST /api/banners': 'Add banner (admin/librarian)',
       'PUT /api/banners/:id': 'Update banner (admin/librarian)',
-
       'PATCH /api/banners/:id/status': 'Update banner status (admin/librarian)',
       'DELETE /api/banners/:id': 'Delete banner (admin)'
     }
@@ -90,6 +106,8 @@ app.use('*', (req, res) => {
       'GET /api/banners',
       'GET /api/collections',
       'GET /api/users (admin)',
+      'POST /api/users/borrow (user)', 
+      'GET /api/users/my-borrows (user)', 
       'GET /api/borrow (admin/librarian)'
     ]
   });
@@ -144,12 +162,18 @@ const startServer = async () => {
       console.log('\n👥 User APIs:');
       console.log(`   GET  http://localhost:${PORT}/api/users (admin)`);
       console.log(`   GET  http://localhost:${PORT}/api/users/search (admin)`);
+      console.log(`   POST http://localhost:${PORT}/api/users/borrow (authenticated user)`);
+      console.log(`   GET  http://localhost:${PORT}/api/users/my-borrows (authenticated user)`);
       console.log('\n📁 Collection APIs:');
       console.log(`   GET  http://localhost:${PORT}/api/collections`);
       console.log(`   POST http://localhost:${PORT}/api/collections (admin/librarian)`);
-      console.log('\n📋 Borrow APIs:');
+      console.log('\n📋 Borrow APIs (Admin/Librarian):');
       console.log(`   GET  http://localhost:${PORT}/api/borrow (admin/librarian)`);
       console.log(`   POST http://localhost:${PORT}/api/borrow (admin/librarian)`);
+      console.log('='.repeat(60));
+      console.log('\n🎉 NEW FEATURE: Users can now borrow books directly!');
+      console.log('   📖 POST /api/users/borrow - User self-service borrowing');
+      console.log('   📚 GET /api/users/my-borrows - View personal borrow history');
       console.log('='.repeat(60));
     });
 

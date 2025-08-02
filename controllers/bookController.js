@@ -283,18 +283,7 @@ const deleteBook = async (req, res) => {
             });
         }
 
-        // TODO: Check if book is currently borrowed
-        // const borrowCheck = await query(
-        //     'SELECT * FROM muontra WHERE idbook = $1 AND trangthai = $2',
-        //     [id, 'borrowed']
-        // );
 
-        // if (borrowCheck.rows.length > 0) {
-        //     return res.status(400).json({
-        //         success: false,
-        //         message: 'Không thể xóa sách đang được mượn'
-        //     });
-        // }
 
         await query(
             'DELETE FROM sach WHERE idbook = $1',
@@ -418,6 +407,148 @@ const getPopularBooks = async (req, res) => {
     }
 };
 
+const checkBooksAvailability = async (req, res) => {
+    try {
+        const { bookIds } = req.body;
+
+        if (!bookIds || !Array.isArray(bookIds) || bookIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Vui lòng cung cấp danh sách ID sách'
+            });
+        }
+
+        if (bookIds.length > 50) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tối đa 50 sách mỗi lần kiểm tra'
+            });
+        }
+
+        const placeholders = bookIds.map((_, index) => `$${index + 1}`).join(',');
+        
+        const result = await query(`
+            SELECT 
+                idbook,
+                titlebook,
+                authorbook,
+                availablebook,
+                quantitybook,
+                CASE 
+                    WHEN availablebook > 0 THEN true 
+                    ELSE false 
+                END as is_available
+            FROM sach 
+            WHERE idbook IN (${placeholders})
+        `, bookIds);
+
+        const availabilityMap = {};
+        result.rows.forEach(book => {
+            availabilityMap[book.idbook] = {
+                id: book.idbook,
+                title: book.titlebook,
+                author: book.authorbook,
+                available: book.availablebook,
+                total: book.quantitybook,
+                isAvailable: book.is_available
+            };
+        });
+
+        const notFound = bookIds.filter(id => !availabilityMap[id]);
+
+        res.json({
+            success: true,
+            data: {
+                books: availabilityMap,
+                summary: {
+                    total: bookIds.length,
+                    available: result.rows.filter(book => book.is_available).length,
+                    unavailable: result.rows.filter(book => !book.is_available).length,
+                    notFound: notFound.length
+                },
+                notFound
+            }
+        });
+
+    } catch (error) {
+        console.error('Check books availability error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi kiểm tra tình trạng sách'
+        });
+    }
+};
+
+const getBulkBooks = async (req, res) => {
+    try {
+        const { ids } = req.query;
+
+        if (!ids) {
+            return res.status(400).json({
+                success: false,
+                message: 'Vui lòng cung cấp danh sách ID sách (query parameter: ids=1,2,3)'
+            });
+        }
+
+        const bookIds = ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+
+        if (bookIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Danh sách ID sách không hợp lệ'
+            });
+        }
+
+        if (bookIds.length > 100) {
+            return res.status(400).json({
+                success: false,
+                message: 'Tối đa 100 sách mỗi lần'
+            });
+        }
+
+        const placeholders = bookIds.map((_, index) => `$${index + 1}`).join(',');
+        
+        const result = await query(`
+            SELECT 
+                idbook,
+                titlebook,
+                authorbook,
+                publisherbook,
+                yearbook,
+                isbnbook,
+                categorybook,
+                quantitybook,
+                availablebook,
+                imagebook,
+                descriptionbook,
+                createdat
+            FROM sach 
+            WHERE idbook IN (${placeholders})
+            ORDER BY titlebook ASC
+        `, bookIds);
+
+        res.json({
+            success: true,
+            data: {
+                books: result.rows,
+                summary: {
+                    requested: bookIds.length,
+                    found: result.rows.length,
+                    notFound: bookIds.length - result.rows.length
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get bulk books error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi lấy thông tin sách'
+        });
+    }
+};
+
+
 module.exports = {
     getAllBooks,
     getBookById,
@@ -426,5 +557,7 @@ module.exports = {
     deleteBook,
     getCategories,
     searchBooks,
-    getPopularBooks
+    getPopularBooks,
+    checkBooksAvailability,
+    getBulkBooks
 };

@@ -252,6 +252,247 @@ const getUserProfile = async (req, res) => {
     }
 };
 
+const getMyProfile = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+
+        const result = await query(`
+            SELECT 
+                u.iduser,
+                u.nameuser,
+                u.emailuser,
+                u.createdat,
+                CASE 
+                    WHEN th.iduser IS NOT NULL THEN 'librarian'
+                    WHEN d.iduser IS NOT NULL THEN 'member'
+                    ELSE 'user'
+                END as userrole,
+                CASE 
+                    WHEN d.idcard IS NOT NULL THEN true
+                    ELSE false
+                END as haslibrarycard,
+                d.idcard,
+                t.namecard,
+                t.addresscard,
+                t.phonecard,
+                t.startcard,
+                t.expirecard,
+                t.statuscard
+            FROM account_user u
+            LEFT JOIN docgia d ON u.iduser = d.iduser
+            LEFT JOIN thuthu th ON u.iduser = th.iduser
+            LEFT JOIN thethuvien t ON d.idcard = t.idcard
+            WHERE u.iduser = $1
+        `, [userId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy thông tin người dùng'
+            });
+        }
+
+        const user = result.rows[0];
+
+        const userProfile = {
+            id: user.iduser,
+            name: user.nameuser,
+            email: user.emailuser,
+            role: user.userrole,
+            hasLibraryCard: user.haslibrarycard,
+            createdAt: user.createdat,
+            libraryCard: user.idcard ? {
+                cardId: user.idcard,
+                name: user.namecard,
+                address: user.addresscard,
+                phone: user.phonecard,
+                memberSince: user.startcard,
+                cardExpiry: user.expirecard,
+                cardStatus: user.statuscard
+            } : null
+        };
+
+        res.json({
+            success: true,
+            data: userProfile
+        });
+
+    } catch (error) {
+        console.error('Get my profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi lấy thông tin hồ sơ'
+        });
+    }
+};
+
+const updateMyProfile = async (req, res) => {
+    try {
+           console.log('req.user:', req.user);
+        console.log('req.user.id:', req.user.id);
+        console.log('req.user.iduser:', req.user.iduser);
+        const userId = req.user.userId; 
+        console.log('Final userId:', userId);
+        const { name, email, phone, address } = req.body;
+
+        const checkUser = await query(
+            'SELECT * FROM account_user WHERE iduser = $1',
+            [userId]
+        );
+
+        if (checkUser.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy người dùng'
+            });
+        }
+
+        if (email && email !== checkUser.rows[0].emailuser) {
+            const checkEmail = await query(
+                'SELECT * FROM account_user WHERE emailuser = $1 AND iduser != $2',
+                [email, userId]
+            );
+
+            if (checkEmail.rows.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Email đã được sử dụng'
+                });
+            }
+        }
+
+        let updateUserFields = [];
+        let userParams = [];
+        let userParamCount = 1;
+
+        if (name) {
+            updateUserFields.push(`nameuser = $${userParamCount}`);
+            userParams.push(name);
+            userParamCount++;
+        }
+        if (email) {
+            updateUserFields.push(`emailuser = $${userParamCount}`);
+            userParams.push(email);
+            userParamCount++;
+        }
+
+        if (updateUserFields.length > 0) {
+            userParams.push(userId);
+            const updateUserQuery = `
+                UPDATE account_user 
+                SET ${updateUserFields.join(', ')} 
+                WHERE iduser = $${userParamCount}
+            `;
+            await query(updateUserQuery, userParams);
+        }
+
+        if ((phone || address || name)) {
+            const checkLibraryCard = await query(`
+                SELECT d.idcard, t.idcard as card_exists 
+                FROM docgia d
+                LEFT JOIN thethuvien t ON d.idcard = t.idcard
+                WHERE d.iduser = $1
+            `, [userId]);
+
+            if (checkLibraryCard.rows.length > 0 && checkLibraryCard.rows[0].card_exists) {
+                const cardId = checkLibraryCard.rows[0].idcard;
+                
+                let updateCardFields = [];
+                let cardParams = [];
+                let cardParamCount = 1;
+
+                if (name) {
+                    updateCardFields.push(`namecard = $${cardParamCount}`);
+                    cardParams.push(name);
+                    cardParamCount++;
+                }
+                if (phone) {
+                    updateCardFields.push(`phonecard = $${cardParamCount}`);
+                    cardParams.push(phone);
+                    cardParamCount++;
+                }
+                if (address) {
+                    updateCardFields.push(`addresscard = $${cardParamCount}`);
+                    cardParams.push(address);
+                    cardParamCount++;
+                }
+
+                if (updateCardFields.length > 0) {
+                    cardParams.push(cardId);
+                    const updateCardQuery = `
+                        UPDATE thethuvien 
+                        SET ${updateCardFields.join(', ')} 
+                        WHERE idcard = $${cardParamCount}
+                    `;
+                    await query(updateCardQuery, cardParams);
+                }
+            }
+        }
+
+        const result = await query(`
+            SELECT 
+                u.iduser,
+                u.nameuser,
+                u.emailuser,
+                u.createdat,
+                CASE 
+                    WHEN th.iduser IS NOT NULL THEN 'librarian'
+                    WHEN d.iduser IS NOT NULL THEN 'member'
+                    ELSE 'user'
+                END as userrole,
+                CASE 
+                    WHEN d.idcard IS NOT NULL THEN true
+                    ELSE false
+                END as haslibrarycard,
+                d.idcard,
+                t.namecard,
+                t.addresscard,
+                t.phonecard,
+                t.startcard,
+                t.expirecard,
+                t.statuscard
+            FROM account_user u
+            LEFT JOIN docgia d ON u.iduser = d.iduser
+            LEFT JOIN thuthu th ON u.iduser = th.iduser
+            LEFT JOIN thethuvien t ON d.idcard = t.idcard
+            WHERE u.iduser = $1
+        `, [userId]);
+
+        const user = result.rows[0];
+
+        const userProfile = {
+            id: user.iduser,
+            name: user.nameuser,
+            email: user.emailuser,
+            role: user.userrole,
+            hasLibraryCard: user.haslibrarycard,
+            createdAt: user.createdat,
+            libraryCard: user.idcard ? {
+                cardId: user.idcard,
+                name: user.namecard,
+                address: user.addresscard,
+                phone: user.phonecard,
+                memberSince: user.startcard,
+                cardExpiry: user.expirecard,
+                cardStatus: user.statuscard
+            } : null
+        };
+
+        res.json({
+            success: true,
+            message: 'Cập nhật thông tin thành công',
+            data: userProfile
+        });
+
+    } catch (error) {
+        console.error('Update my profile error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi cập nhật thông tin'
+        });
+    }
+};
+
 const searchUsers = async (req, res) => {
     try {
         const { name = '', email = '', role = '' } = req.query;
@@ -330,5 +571,7 @@ module.exports = {
     updateUser,
     deleteUser,
     getUserProfile,
+    getMyProfile,
+    updateMyProfile,
     searchUsers
 };
